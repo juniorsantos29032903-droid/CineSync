@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CineSync Pro - V14 Always On</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* --- ESTILOS CSS --- */
+        :root { --bg: #000; --panel: #111; --accent: #e50914; --text: #fff; --success: #2ecc71; --horn: #e67e22; --danger: #c0392b; --blue: #3498db; --warning: #f1c40f; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; outline: none; -webkit-tap-highlight-color: transparent; }
+        
+        body { 
+            background: var(--bg); color: var(--text); height: 100dvh; display: flex; flex-direction: column; overflow: hidden; 
+            overscroll-behavior: none; 
+        }
+
+        /* TELAS DE BLOQUEIO */
+        .overlay-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000;
+            z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 20px; transition: opacity 0.5s;
+        }
+        .overlay-screen.fade-out { opacity: 0; pointer-events: none; }
+        
+        .login-box {
+            background: #111; border: 1px solid #333; padding: 30px; border-radius: 15px;
+            width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 30px rgba(229, 9, 20, 0.2);
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .login-logo { font-size: 2rem; font-weight: 800; margin-bottom: 10px; }
+
+        .start-btn {
+            margin-top: 20px; padding: 15px 40px; font-size: 1.2rem; background: var(--success); color: #000;
+            border: none; border-radius: 50px; font-weight: bold; cursor: pointer; text-transform: uppercase;
+            box-shadow: 0 0 15px rgba(46, 204, 113, 0.5); animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
+        /* HEADER */
+        header {
+            height: 50px; background: #0a0a0a; border-bottom: 1px solid #333;
+            display: flex; align-items: center; justify-content: space-between; padding: 0 15px; flex-shrink: 0; z-index: 20;
+        }
+        .user-profile { display: flex; align-items: center; gap: 8px; background: #222; padding: 4px 10px; border-radius: 20px; border: 1px solid #333; }
+        .user-avatar { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+        .user-name { font-size: 0.8rem; max-width: 80px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        .btn-icon { background: none; border: none; color: white; font-size: 1.2rem; cursor: pointer; padding: 10px; position: relative; transition: color 0.2s; }
+        .btn-icon.is-off { color: var(--danger); }
+        
+        #chatBadge { position: absolute; top: 5px; right: 5px; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; display: none; border: 1px solid #fff; }
+        
+        #connection-status {
+            width: 10px; height: 10px; border-radius: 50%; margin-left: 10px;
+            background: var(--danger); box-shadow: 0 0 5px var(--danger);
+            transition: background 0.3s;
+        }
+        #connection-status.connecting { background: var(--warning); box-shadow: 0 0 5px var(--warning); }
+        #connection-status.connected { background: var(--success); box-shadow: 0 0 5px var(--success); }
+
+        #leaderTag {
+            font-size: 0.7rem; background: #f1c40f; color: #000; padding: 2px 8px; border-radius: 4px;
+            font-weight: bold; margin-left: 10px; display: none; text-transform: uppercase;
+        }
+        #leaderTag.active { display: inline-block; }
+
+        /* ÁREA PRINCIPAL */
+        .stage { flex: 1; display: flex; flex-direction: column; position: relative; background: #000; overflow: hidden; }
+        .cinema-area { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; background: black; overflow: hidden; }
+        
+        .viewer-layer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; display: none; pointer-events: none; }
+        .viewer-layer.active { display: block; pointer-events: auto; }
+        iframe { width: 100%; height: 100%; border: none; }
+
+        #sync-badge {
+            position: absolute; top: 15px; right: 15px;
+            width: 12px; height: 12px; background: #2ecc71;
+            border-radius: 50%; box-shadow: 0 0 10px #2ecc71;
+            z-index: 60; display: none; pointer-events: none;
+        }
+        #sync-badge.visible { display: block; animation: pulseGreen 1.5s infinite; }
+        @keyframes pulseGreen { 
+            0% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7); } 
+            70% { transform: scale(1.2); opacity: 0.8; box-shadow: 0 0 0 10px rgba(46, 204, 113, 0); }
+            100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+        }
+
+        .touch-ripple {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 20px; height: 20px; border-radius: 50%;
+            background: rgba(255, 255, 255, 0.6);
+            border: 4px solid rgba(255, 255, 255, 0.9);
+            pointer-events: none; z-index: 999;
+            animation: rippleEffect 0.8s ease-out forwards;
+            display: none;
+        }
+        .touch-ripple.active { display: block; }
+        @keyframes rippleEffect {
+            0% { width: 20px; height: 20px; opacity: 1; border-width: 10px; }
+            100% { width: 300px; height: 300px; opacity: 0; border-width: 0px; }
+        }
+
+        .url-overlay {
+            position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 500px; background: rgba(20,20,20,0.95); padding: 6px; 
+            border-radius: 30px; display: flex; gap: 8px; z-index: 50;
+            transition: top 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+        .url-overlay.hidden { top: -100px; }
+        .input-round { flex: 1; background: transparent; border: none; color: white; text-align: center; font-size: 0.9rem; }
+        .btn-round { width: 36px; height: 36px; border-radius: 50%; border: none; cursor: pointer; color: white; display: flex; justify-content: center; align-items: center; }
+        .btn-round:hover { background: #444; }
+
+        #pull-cord { position: absolute; top: -50px; left: 50%; transform: translateX(-50%); width: 60px; height: 60px; z-index: 49; cursor: pointer; transition: top 0.3s; display: flex; justify-content: center; }
+        #pull-cord.visible { top: -10px; }
+        .cord-string { width: 4px; height: 40px; background: var(--accent); position: absolute; top: 0; }
+        .cord-knob { width: 20px; height: 20px; background: var(--accent); border-radius: 50%; position: absolute; bottom: 10px; display: flex; align-items: center; justify-content: center; font-size: 10px; }
+
+        /* Câmeras */
+        .cams-dock { height: 22vh; min-height: 130px; background: #0f0f0f; border-top: 1px solid #222; display: flex; padding: 5px; gap: 5px; flex-shrink: 0; }
+        .cam-box { flex: 1; background: #000; border-radius: 6px; border: 1px solid #333; position: relative; overflow: hidden; transition: all 0.3s; }
+        .cam-box.connected { border-color: var(--success); }
+        
+        /* STATUS OFFLINE (NOVO) */
+        .cam-box.offline { border-color: var(--danger); }
+        .cam-box.offline video { filter: grayscale(100%) brightness(0.3); }
+        .cam-box.offline::after {
+            content: 'OFFLINE'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: var(--danger); font-weight: 900; font-size: 1.5rem; border: 2px solid var(--danger);
+            padding: 5px 10px; border-radius: 8px; background: rgba(0,0,0,0.8); z-index: 30;
+        }
+
+        video.webcam { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .label { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; color: #fff; z-index: 2; pointer-events: none; }
+        
+        .cam-overlay-controls {
+            position: absolute; top: 5px; right: 5px; z-index: 10; display: flex; gap: 5px;
+        }
+        .btn-cam-ctrl {
+            padding: 5px; font-size: 0.8rem; background: rgba(0,0,0,0.5); border-radius: 4px; border: none; color: white; cursor: pointer;
+        }
+
+        #btnRetryVideo {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7); color: #e74c3c; border: 1px solid #e74c3c;
+            padding: 8px 15px; border-radius: 20px; cursor: pointer; z-index: 20; display: none; font-size: 0.8rem;
+        }
+        #btnRetryVideo:hover { background: #e74c3c; color: white; }
+
+        .btn-quick-add {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            width: 30px; height: 30px; border-radius: 50%; border: none;
+            background: rgba(0,0,0,0.6); color: white; cursor: pointer; display: none;
+            align-items: center; justify-content: center; transition: background 0.2s;
+        }
+        .btn-quick-add:hover { background: var(--success); }
+
+        /* Menus */
+        .side-panel { position: fixed; top: 50px; bottom: 0; width: 85%; max-width: 320px; background: rgba(15,15,15,0.98); border: 1px solid #333; z-index: 100; transition: transform 0.3s; display: flex; flex-direction: column; }
+        #chatPanel { left: 0; transform: translateX(-100%); }
+        #chatPanel.open { transform: translateX(0); }
+        #settingsPanel { right: 0; transform: translateX(100%); }
+        #settingsPanel.open { transform: translateX(0); }
+        .panel-content { padding: 20px; flex: 1; overflow-y: auto; }
+
+        /* Chat */
+        .chat-history { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: #050505; }
+        .msg { padding: 8px 12px; border-radius: 10px; max-width: 85%; font-size: 0.9rem; word-wrap: break-word; }
+        .msg.me { background: var(--accent); align-self: flex-end; color: white; }
+        .msg.them { background: #222; align-self: flex-start; color: #ddd; }
+        .msg.system { background: transparent; color: #aaa; font-size: 0.8rem; align-self: center; text-align: center; font-style: italic; }
+        
+        /* Chat Controls */
+        .chat-bar { padding: 10px; background: #111; display: flex; gap: 8px; align-items: center; flex-direction: column;}
+        .chat-input-row { display: flex; width: 100%; gap: 8px; }
+        .input-full { width: 100%; padding: 12px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; }
+        
+        .btn-horn {
+            width: 100%; padding: 10px; background: var(--horn); color: white; border: none; border-radius: 8px;
+            font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;
+            box-shadow: 0 4px 0 #d35400; transition: all 0.1s;
+        }
+        .btn-horn:active { transform: translateY(4px); box-shadow: 0 0 0 #d35400; }
+
+        /* UI Geral */
+        .btn-full { width: 100%; padding: 12px; border: none; font-weight: bold; cursor: pointer; border-radius: 4px; margin-bottom: 10px; }
+        .btn-connect { background: var(--success); color: #000; }
+        .btn-logout { background: #c0392b; color: white; margin-top: 20px; }
+        
+        .id-box { 
+            padding: 15px; background: #222; color: var(--success); font-family: monospace; 
+            cursor: pointer; border: 2px dashed #444; margin-bottom: 5px; text-align: center; 
+            border-radius: 8px; font-size: 1.1rem; font-weight: bold;letter-spacing: 1px;
+        }
+
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 50; display: none; }
+        #overlay.active { display: block; }
+        #toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: white; padding: 15px; border-radius: 8px; text-align: center; z-index: 200; display: none; border: 1px solid #444; pointer-events: none; }
+
+        /* Lista de Amigos */
+        .friend-item { 
+            display: flex; align-items: center; gap: 10px; background: #222; padding: 10px; 
+            border-radius: 8px; margin-bottom: 8px; border: 1px solid transparent; 
+        }
+        .friend-item:hover { border-color: #444; background: #2a2a2a; }
+        .friend-avatar { width: 32px; height: 32px; border-radius: 50%; }
+        .friend-info { flex: 1; overflow: hidden; }
+        .friend-name { font-size: 0.9rem; font-weight: bold; }
+        .friend-id { font-size: 0.7rem; color: #aaa; font-family: monospace; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+        
+        .friend-actions { display: flex; gap: 5px; }
+        .btn-mini { 
+            width: 32px; height: 32px; border: none; border-radius: 6px; 
+            display: flex; align-items: center; justify-content: center; cursor: pointer; color: white; 
+        }
+        .btn-go { background: var(--blue); }
+        .btn-go:hover { background: #2980b9; }
+        .btn-trash { background: #c0392b; }
+        .btn-trash:hover { background: #a93226; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen" class="overlay-screen">
+        <div class="login-box">
+            <div class="login-logo">CINE<span style="color:var(--accent)">SYNC</span></div>
+            <p style="color:#aaa; font-size:0.9rem; margin-bottom:20px;">Faça login para salvar seu ID</p>
+            <div id="g_id_onload" data-callback="handleCredentialResponse" data-auto_prompt="false" data-theme="filled_black"></div>
+            <div class="g_id_signin" data-type="standard" data-shape="pill" data-theme="filled_black" data-text="signin_with" data-size="large" data-logo_alignment="left"></div>
+        </div>
+    </div>
+
+    <div id="start-gate" class="overlay-screen" style="display:none; background:#050505;">
+        <div class="login-box" style="border:none; background:transparent; box-shadow:none;">
+            <div class="login-logo" style="margin-bottom:20px;">CINE <span style="color:var(--success)">ONLINE</span></div>
+            
+            <button class="start-btn" onclick="enterApp()">
+                <i class="fas fa-power-off"></i> INICIAR SESSÃO
+            </button>
+
+            <p style="color:#666; margin-top:20px; font-size:0.8rem;">
+                Modo WakeLock ativado para manter a câmera ligada.
+            </p>
+        </div>
+    </div>
+
+    <div id="overlay" onclick="closeMenus()"></div>
+    <div id="toast">Notificação</div>
+
+    <header>
+        <button class="btn-icon" onclick="toggleMenu('chat')">
+            <i class="fas fa-comment-alt"></i>
+            <div id="chatBadge"></div>
+        </button>
+        
+        <div style="display:flex; align-items:center;">
+            <div class="user-profile">
+                <img src="https://via.placeholder.com/24" id="userAvatar" class="user-avatar">
+                <span id="userName" class="user-name">...</span>
+            </div>
+            <div id="connection-status" title="Status da Conexão"></div>
+            <span id="leaderTag">LÍDER</span>
+        </div>
+
+        <button class="btn-icon" onclick="toggleMenu('settings')">
+            <i class="fas fa-sliders-h"></i>
+        </button>
+    </header>
+
+    <div class="stage">
+        <div class="cinema-area" onmousemove="resetBarTimer()" onclick="resetBarTimer()">
+            <div id="pull-cord" onclick="forceShowBar()"><div class="cord-string"></div><div class="cord-knob"><i class="fas fa-chevron-down"></i></div></div>
+            
+            <div id="sync-badge"></div>
+            <div id="visualRipple" class="touch-ripple"></div>
+
+            <div class="url-overlay" id="urlBar">
+                <input type="text" id="mainInput" class="input-round" placeholder="Cole link YouTube ou Embed" onfocus="this.select()">
+                <button class="btn-round" style="background: #8e44ad" onclick="handleEmbedPrompt()"><i class="fas fa-code"></i></button>
+                <button class="btn-round" style="background:var(--accent)" onclick="processInput()"><i class="fas fa-play"></i></button>
+            </div>
+            
+            <div id="placeholder-screen" class="viewer-layer active" style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                <i class="fab fa-youtube" style="font-size:4rem; opacity:0.3; margin-bottom:10px;"></i>
+                <p>Aguardando vídeo...</p>
+            </div>
+            <div id="yt-layer" class="viewer-layer"><div id="yt-player"></div></div>
+            <div id="custom-layer" class="viewer-layer"><div id="custom-frame-container" style="width:100%;height:100%"></div></div>
+        </div>
+        
+        <div class="cams-dock">
+            <div class="cam-box">
+                <video id="localVideo" class="webcam" autoplay muted playsinline></video>
+                <div class="label">Você</div>
+                <div class="cam-overlay-controls">
+                    <button id="btnCam" onclick="toggleMedia('video')" class="btn-cam-ctrl"><i class="fas fa-video"></i></button>
+                    <button id="btnMic" onclick="toggleMedia('audio')" class="btn-cam-ctrl"><i class="fas fa-microphone"></i></button>
+                </div>
+            </div>
+            <div class="cam-box" id="remoteBox">
+                <button id="btnQuickAddFriend" class="btn-quick-add" onclick="saveCurrentFriend()" title="Salvar/Atualizar Amigo"><i class="fas fa-user-plus"></i></button>
+                <button id="btnRetryVideo" onclick="retryCall()" title="Recarregar Vídeo do Amigo"><i class="fas fa-sync"></i> Recarregar</button>
+                <video id="remoteVideo" class="webcam" autoplay playsinline></video>
+                <div class="label">Amigo</div>
+            </div>
+        </div>
+    </div>
+
+    <aside id="chatPanel" class="side-panel">
+        <div style="padding:15px; border-bottom:1px solid #333; font-weight:bold; display:flex; justify-content:space-between;">
+            Chat <i class="fas fa-times" onclick="toggleMenu('chat')"></i>
+        </div>
+        <div class="chat-history" id="chatLog"></div>
+        <div class="chat-bar">
+            <button class="btn-horn" onclick="honk()">
+                <i class="fas fa-bullhorn"></i> BUZINAR
+            </button>
+            
+            <div class="chat-input-row" style="margin-top:10px;">
+                <input type="text" id="chatInput" class="input-full" style="margin:0; border-radius:20px;" placeholder="Mensagem..." onkeydown="if(event.key==='Enter') sendChat()">
+                <button onclick="sendChat()" style="background:none; border:none; color:var(--accent); font-size:1.2rem;"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </aside>
+
+    <aside id="settingsPanel" class="side-panel">
+        <div style="padding:15px; border-bottom:1px solid #333; font-weight:bold; display:flex; justify-content:space-between;">
+            Conexão & Amigos <i class="fas fa-times" onclick="toggleMenu('settings')"></i>
+        </div>
+        <div class="panel-content">
+            <label style="color:#aaa; font-size:0.8rem;">Seu ID Estático:</label>
+            <div id="myId" class="id-box" onclick="copyId()">...</div>
+
+            <div style="background:#222; padding:15px; border-radius:8px; margin-bottom:15px;">
+                <label style="display:block; margin-bottom:5px; font-weight:bold;">Conectar com Amigo</label>
+                <input type="text" id="friendIdInput" class="input-full" style="text-transform:uppercase; text-align:center; letter-spacing:2px; font-weight:bold;" placeholder="EX: CINE-XK92">
+                <button class="btn-full btn-connect" onclick="connectManual()">CONECTAR</button>
+                <button id="btnSaveFriend" class="btn-full" style="background:#2980b9; display:none;" onclick="saveCurrentFriend()">Salvar Amigo Atual</button>
+            </div>
+
+            <div style="margin-bottom:10px; font-weight:bold; color:var(--accent);"><i class="fas fa-user-friends"></i> Amigos Salvos</div>
+            <div id="friendsList" style="min-height:50px;"></div>
+
+            <button class="btn-full btn-logout" onclick="logout()">Sair / Trocar Conta</button>
+        </div>
+    </aside>
+
+    <script>
+        const GOOGLE_CLIENT_ID = "1035155583014-qg8mtgu48g4j5bac79nknn41nb449sff.apps.googleusercontent.com";
+        document.getElementById('g_id_onload').setAttribute('data-client_id', GOOGLE_CLIENT_ID);
+
+        let peer, conn, myStream;
+        let currentCall = null;
+        let ytPlayer, isSyncing = false, barTimer;
+        let myProfile = { name: "Visitante", pic: "", id: "", email: "" };
+        let currentFriendProfile = null; 
+        let amILeader = false; 
+        let wakeLock = null;
+        let pingInterval = null;
+
+        const peerConfig = {
+            debug: 1,
+            config: {
+                iceTransportPolicy: 'all',
+                iceServers: [
+                    { urls: "stun:stun.relay.metered.ca:80" },
+                    {
+                        urls: "turn:standard.relay.metered.ca:80",
+                        username: "cfec2fd6b0fe86e6083ff412",
+                        credential: "Ait1kNY7eGBeTkjj",
+                    },
+                    {
+                        urls: "turn:standard.relay.metered.ca:80?transport=tcp",
+                        username: "cfec2fd6b0fe86e6083ff412",
+                        credential: "Ait1kNY7eGBeTkjj",
+                    },
+                    {
+                        urls: "turn:standard.relay.metered.ca:443",
+                        username: "cfec2fd6b0fe86e6083ff412",
+                        credential: "Ait1kNY7eGBeTkjj",
+                    },
+                    {
+                        urls: "turns:standard.relay.metered.ca:443?transport=tcp",
+                        username: "cfec2fd6b0fe86e6083ff412",
+                        credential: "Ait1kNY7eGBeTkjj",
+                    }
+                ]
+            }
+        };
+
+        window.onload = () => {
+            const saved = localStorage.getItem('cine_session_v4');
+            if (saved) {
+                myProfile = JSON.parse(saved);
+                showGateScreen(); 
+            }
+            renderFriends();
+            const urlParams = new URLSearchParams(window.location.search);
+            if(urlParams.get('conectar')) document.getElementById('friendIdInput').value = urlParams.get('conectar');
+        };
+
+        function handleCredentialResponse(response) {
+            try {
+                const payload = JSON.parse(atob(response.credential.split('.')[1]));
+                const staticId = generateStaticId(payload.email);
+                myProfile = { name: payload.given_name || payload.name, pic: payload.picture, email: payload.email, id: staticId };
+                localStorage.setItem('cine_session_v4', JSON.stringify(myProfile));
+                showGateScreen();
+            } catch (e) { alert("Erro no Login: " + e); }
+        }
+
+        function generateStaticId(email) {
+            let hash = 0;
+            for (let i = 0; i < email.length; i++) { hash = ((hash << 5) - hash) + email.charCodeAt(i); hash |= 0; }
+            const code = Math.abs(hash).toString(36).substring(0, 4).toUpperCase();
+            return "CINE-" + code.padEnd(4, 'X');
+        }
+
+        function showGateScreen() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('start-gate').style.display = 'flex';
+            document.getElementById('userAvatar').src = myProfile.pic;
+            document.getElementById('userName').innerText = myProfile.name;
+            document.getElementById('myId').innerText = myProfile.id;
+        }
+
+        async function requestWakeLock() {
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Wake Lock is active');
+            } catch (err) {
+                console.log(`${err.name}, ${err.message}`);
+            }
+        }
+
+        function enterApp() {
+            const gate = document.getElementById('start-gate');
+            gate.style.display = 'none'; 
+            setTimeout(() => { 
+                startMedia().then(() => {
+                    startPeer();
+                    requestWakeLock(); // Mantém a tela acesa
+                }); 
+            }, 200);
+        }
+
+        async function startMedia() {
+            try {
+                myStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+                document.getElementById('localVideo').srcObject = myStream;
+                document.getElementById('localVideo').muted = true;
+                updateMediaUI('video', true);
+                updateMediaUI('audio', true);
+                return true;
+            } catch(e) { 
+                showToast("Erro: Câmera bloqueada"); 
+                return false; 
+            }
+        }
+
+        function startPeer() {
+            if(peer) peer.destroy();
+            peer = new Peer(myProfile.id, peerConfig);
+
+            peer.on('open', (id) => {
+                document.getElementById('myId').innerText = id;
+            });
+
+            peer.on('error', (err) => {
+                updateConnectionStatus('error');
+                if(err.type === 'unavailable-id') setTimeout(startPeer, 2000);
+            });
+
+            peer.on('call', (call) => {
+                currentCall = call;
+                call.answer(myStream);
+                call.on('stream', (rs) => setupRemoteVideo(rs));
+                call.on('close', () => setFriendOffline());
+            });
+
+            peer.on('connection', (c) => setupConnection(c));
+        }
+
+        function connectManual(idOverride) {
+            let targetId = idOverride || document.getElementById('friendIdInput').value.trim().toUpperCase();
+            if(!targetId) return showToast("Digite um ID!");
+            if(!targetId.startsWith("CINE-") && targetId.length <= 4) targetId = "CINE-" + targetId;
+            
+            showToast("Conectando...");
+            updateConnectionStatus('connecting');
+            
+            const conn = peer.connect(targetId, { reliable: true });
+            setupConnection(conn);
+            
+            if(myStream) {
+                const call = peer.call(targetId, myStream);
+                currentCall = call;
+                call.on('stream', rs => setupRemoteVideo(rs));
+                call.on('close', () => setFriendOffline());
+            }
+        }
+
+        function retryCall() {
+            if(!currentFriendProfile || !peer) return;
+            showToast("Recarregando...");
+            if(currentCall) currentCall.close();
+            if(myStream) {
+                const call = peer.call(currentFriendProfile.id, myStream);
+                currentCall = call;
+                call.on('stream', rs => setupRemoteVideo(rs));
+            }
+        }
+
+        function setupConnection(c) {
+            conn = c;
+            conn.on('open', () => {
+                showToast("✅ Conectado!");
+                updateConnectionStatus('connected');
+                conn.send({ type: 'handshake', profile: myProfile });
+                closeMenus();
+                document.getElementById('sync-badge').classList.add('visible');
+                document.getElementById('remoteBox').classList.remove('offline'); // Remove status offline
+                
+                // Keep Alive Ping
+                if(pingInterval) clearInterval(pingInterval);
+                pingInterval = setInterval(() => {
+                   if(conn.open) conn.send({type: 'ping'}); 
+                }, 2000);
+            });
+            conn.on('data', (data) => handleData(data));
+            conn.on('close', () => {
+                showToast("Amigo desconectou");
+                setFriendOffline();
+            });
+        }
+
+        function setFriendOffline() {
+            updateConnectionStatus('error');
+            const box = document.getElementById('remoteBox');
+            box.classList.remove('connected');
+            box.classList.add('offline'); // ADICIONA VISUAL OFFLINE
+            document.getElementById('sync-badge').classList.remove('visible');
+            if(pingInterval) clearInterval(pingInterval);
+        }
+
+        function updateConnectionStatus(status) {
+            const el = document.getElementById('connection-status');
+            el.className = ''; 
+            if(status === 'connecting') el.classList.add('connecting');
+            if(status === 'connected') el.classList.add('connected');
+        }
+
+        function setupRemoteVideo(stream) {
+            const vid = document.getElementById('remoteVideo');
+            vid.srcObject = stream;
+            vid.play().catch(e=>{});
+            document.getElementById('remoteBox').classList.add('connected');
+            document.getElementById('remoteBox').classList.remove('offline');
+        }
+
+        function handleData(data) {
+            switch(data.type) {
+                case 'handshake':
+                    currentFriendProfile = data.profile;
+                    showToast("Amigo: " + currentFriendProfile.name);
+                    checkFriendSaved();
+                    break;
+                case 'chat': addChatMsg(data.msg, false); break;
+                case 'yt_sync': applyYTSync(data); break;
+                case 'visual_tap': showTouchEffect(); break;
+                case 'navigate': setLeader(false); loadVideo(data.url); break;
+                case 'html_embed': setLeader(false); renderEmbed(data.code); break;
+                case 'claim_leader': setLeader(false); break;
+                case 'sfx_horn': playHorn(); break;
+                case 'ping': break; // Apenas mantém a conexão viva
+            }
+        }
+
+        function saveCurrentFriend() {
+            if(!currentFriendProfile) return;
+            let saved = JSON.parse(localStorage.getItem('cine_friends_v4') || "[]");
+            const index = saved.findIndex(f => f.id === currentFriendProfile.id);
+            if(index === -1) saved.push(currentFriendProfile);
+            else saved[index] = currentFriendProfile;
+            localStorage.setItem('cine_friends_v4', JSON.stringify(saved));
+            renderFriends();
+            checkFriendSaved();
+        }
+        function renderFriends() {
+            const list = document.getElementById('friendsList');
+            const saved = JSON.parse(localStorage.getItem('cine_friends_v4') || "[]");
+            list.innerHTML = "";
+            saved.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'friend-item';
+                div.innerHTML = `<img src="${f.pic}" class="friend-avatar"><div class="friend-info"><div class="friend-name">${f.name}</div><div class="friend-id">${f.id}</div></div><div class="friend-actions"><button class="btn-mini btn-go" onclick="connectManual('${f.id}')"><i class="fas fa-plug"></i></button><button class="btn-mini btn-trash" onclick="removeFriend('${f.id}')"><i class="fas fa-trash"></i></button></div>`;
+                list.appendChild(div);
+            });
+        }
+        function removeFriend(id) {
+            let saved = JSON.parse(localStorage.getItem('cine_friends_v4') || "[]");
+            saved = saved.filter(f => f.id !== id);
+            localStorage.setItem('cine_friends_v4', JSON.stringify(saved));
+            renderFriends();
+            checkFriendSaved();
+        }
+        function checkFriendSaved() {
+            if(!currentFriendProfile) return;
+            const saved = JSON.parse(localStorage.getItem('cine_friends_v4') || "[]");
+            const isSaved = saved.some(f => f.id === currentFriendProfile.id);
+            document.getElementById('btnSaveFriend').style.display = isSaved ? 'none' : 'block';
+            const btnQuick = document.getElementById('btnQuickAddFriend');
+            btnQuick.style.display = 'flex';
+            if(isSaved) { btnQuick.innerHTML = '<i class="fas fa-check"></i>'; btnQuick.style.background = 'var(--success)'; btnQuick.disabled = true; } 
+            else { btnQuick.innerHTML = '<i class="fas fa-user-plus"></i>'; btnQuick.style.background = 'rgba(0,0,0,0.6)'; btnQuick.disabled = false; }
+        }
+
+        function setLeader(isLeader) {
+            amILeader = isLeader;
+            const tag = document.getElementById('leaderTag');
+            if(isLeader) { tag.classList.add('active'); showToast("👑 Você é o Líder"); } 
+            else { tag.classList.remove('active'); }
+        }
+
+        function onYouTubeIframeAPIReady() {
+            ytPlayer = new YT.Player('yt-player', {
+                height: '100%', width: '100%',
+                playerVars: { 'autoplay': 0, 'controls': 1, 'rel': 0, 'playsinline': 1, 'origin': window.location.origin },
+                events: { 'onStateChange': onPlayerStateChange }
+            });
+        }
+
+        function onPlayerStateChange(event) {
+            if(!amILeader || isSyncing || (document.hidden && event.data === 2)) return;
+            if(event.data === 1) {
+                sendData({ type: 'yt_sync', action: 'play', time: ytPlayer.getCurrentTime() });
+                sendData({ type: 'visual_tap' });
+            }
+            else if (event.data === 2) sendData({ type: 'yt_sync', action: 'pause' });
+        }
+
+        function applyYTSync(d) {
+            if(amILeader) return;
+            isSyncing = true;
+            if(d.action === 'play') {
+                let diff = Math.abs(ytPlayer.getCurrentTime() - d.time);
+                if(diff > 1.0) ytPlayer.seekTo(d.time, true);
+                ytPlayer.playVideo(); 
+            } else { ytPlayer.pauseVideo(); }
+            setTimeout(() => isSyncing = false, 1000);
+        }
+
+        function showTouchEffect() {
+            const ripple = document.getElementById('visualRipple');
+            ripple.classList.remove('active');
+            void ripple.offsetWidth;
+            ripple.classList.add('active');
+        }
+
+        function processInput() {
+            let val = document.getElementById('mainInput').value.trim();
+            if(!val) return;
+            setLeader(true); sendData({ type: 'claim_leader' });
+            if(val.startsWith('<iframe')) { renderEmbed(val); sendData({ type: 'html_embed', code: val }); return; }
+            if(!val.startsWith('http')) val = 'https://' + val;
+            loadVideo(val); sendData({ type: 'navigate', url: val });
+        }
+
+        function loadVideo(url) {
+            const ytId = extractYouTubeID(url);
+            document.querySelectorAll('.viewer-layer').forEach(e => e.classList.remove('active'));
+            if(ytId) { document.getElementById('yt-layer').classList.add('active'); if(ytPlayer && ytPlayer.loadVideoById) ytPlayer.loadVideoById(ytId); } 
+            else { renderEmbed(`<iframe src="${url}" allowfullscreen allow="autoplay" style="width:100%;height:100%;border:none;"></iframe>`); }
+            document.getElementById('mainInput').value = url;
+        }
+
+        function renderEmbed(html) {
+            document.querySelectorAll('.viewer-layer').forEach(e => e.classList.remove('active'));
+            document.getElementById('custom-layer').classList.add('active');
+            document.getElementById('custom-frame-container').innerHTML = html;
+        }
+
+        function extractYouTubeID(url) {
+            const reg = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+            const match = url.match(reg);
+            return match ? match[1] : null;
+        }
+
+        function honk() { playHorn(); sendData({ type: 'sfx_horn' }); addChatMsg("📢 BUZINOU!", true); }
+        function playHorn() {
+            const audio = new Audio('https://www.myinstants.com/media/sounds/mlg-airhorn.mp3');
+            audio.volume = 1.0; audio.play().catch(e => console.log(e));
+            document.body.style.transform = "translate(2px, 2px)";
+            setTimeout(() => document.body.style.transform = "none", 100);
+        }
+
+        function sendChat() {
+            const input = document.getElementById('chatInput');
+            const txt = input.value.trim();
+            if(!txt) return;
+            addChatMsg(txt, true); sendData({ type: 'chat', msg: txt });
+            input.value = "";
+        }
+
+        function addChatMsg(txt, isMe) {
+            const log = document.getElementById('chatLog');
+            const div = document.createElement('div');
+            div.className = `msg ${isMe ? 'me' : 'them'}`;
+            div.innerText = txt;
+            log.appendChild(div); log.scrollTop = log.scrollHeight;
+        }
+
+        function sendData(obj) { if(conn && conn.open) conn.send(obj); }
+        function logout() { localStorage.removeItem('cine_session_v4'); location.reload(); }
+        function copyId() { navigator.clipboard.writeText(myProfile.id); showToast("ID Copiado!"); }
+        
+        function toggleMedia(type) {
+            if(!myStream) return;
+            const track = type==='video' ? myStream.getVideoTracks()[0] : myStream.getAudioTracks()[0];
+            if(track) { track.enabled = !track.enabled; updateMediaUI(type, track.enabled); showToast(type + (track.enabled ? ' Ligado' : ' Mudo')); }
+        }
+
+        function updateMediaUI(type, isOpen) {
+            const btn = document.getElementById(type === 'video' ? 'btnCam' : 'btnMic');
+            const icon = btn.querySelector('i');
+            if (isOpen) { btn.classList.remove('is-off'); icon.className = type === 'video' ? 'fas fa-video' : 'fas fa-microphone'; } 
+            else { btn.classList.add('is-off'); icon.className = type === 'video' ? 'fas fa-video-slash' : 'fas fa-microphone-slash'; }
+        }
+
+        function toggleMenu(id) {
+            const p = document.getElementById(id+'Panel');
+            const active = p.classList.contains('open');
+            closeMenus();
+            if(!active) { p.classList.add('open'); document.getElementById('overlay').classList.add('active'); if(id==='chat') document.getElementById('chatBadge').style.display='none'; }
+        }
+        function closeMenus() { document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('open')); document.getElementById('overlay').classList.remove('active'); }
+        function showToast(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 3000); }
+        function resetBarTimer() { const b=document.getElementById('urlBar'),c=document.getElementById('pull-cord'); b.classList.remove('hidden'); c.classList.remove('visible'); clearTimeout(barTimer); barTimer=setTimeout(()=>{b.classList.add('hidden');c.classList.add('visible');},3000); }
+        function forceShowBar() { resetBarTimer(); }
+        function handleEmbedPrompt() { const code = prompt("HTML Embed:"); if(code) { setLeader(true); sendData({type:'claim_leader'}); renderEmbed(code); sendData({type:'html_embed', code:code}); } }
+        
+        // Reativa Wake Lock se a página voltar ao foco
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible') {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        });
+    </script>
+</body>
+</html>
+
